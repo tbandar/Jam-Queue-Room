@@ -24,7 +24,7 @@ remote at the app's first release, permanently), deploy instead ships the
 current checkout, including dirty or unpushed bytes, and records no commit
 lineage for that release; use ordinary Git to decide what should be committed
 and pushed. For parallel DeepSpace-source work: `workspace new -t "<task>"` →
-commit → `workspace sync` → `workspace land`. Use `status`, `activity`,
+commit → `workspace sync` → `workspace land`. Use `status`, `activity`
 `releases`, and `rollback` to recover context and inspect what is live.
 
 ## Project commands
