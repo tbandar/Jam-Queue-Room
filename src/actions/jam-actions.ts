@@ -100,19 +100,35 @@ function normalizeTrackKey(title: string, artist: string): string {
 function isNearMatch(aKey: string, bKey: string): boolean {
   if (!aKey || !bKey) return false
   if (aKey === bKey) return true
-  const [aTitle, aArtist] = aKey.split('::')
-  const [bTitle, bArtist] = bKey.split('::')
+
+  const [aTitle = '', aArtist = ''] = aKey.split('::')
+  const [bTitle = '', bArtist = ''] = bKey.split('::')
   if (!aTitle || !bTitle) return false
+
+  const aCompactTitle = aTitle.replace(/\s+/g, '')
+  const bCompactTitle = bTitle.replace(/\s+/g, '')
+
   const titleMatch =
     aTitle === bTitle ||
+    aCompactTitle === bCompactTitle ||
     (aTitle.length >= 4 && bTitle.includes(aTitle)) ||
-    (bTitle.length >= 4 && aTitle.includes(bTitle))
+    (bTitle.length >= 4 && aTitle.includes(bTitle)) ||
+    (aCompactTitle.length >= 4 && bCompactTitle.includes(aCompactTitle)) ||
+    (bCompactTitle.length >= 4 && aCompactTitle.includes(bCompactTitle))
+
+  const aCompactArtist = aArtist.replace(/\s+/g, '')
+  const bCompactArtist = bArtist.replace(/\s+/g, '')
+
   const artistMatch =
     !aArtist ||
     !bArtist ||
     aArtist === bArtist ||
+    aCompactArtist === bCompactArtist ||
     aArtist.includes(bArtist) ||
-    bArtist.includes(aArtist)
+    bArtist.includes(aArtist) ||
+    (aCompactArtist.length >= 3 && bCompactArtist.includes(aCompactArtist)) ||
+    (bCompactArtist.length >= 3 && aCompactArtist.includes(bCompactArtist))
+
   return titleMatch && artistMatch
 }
 
