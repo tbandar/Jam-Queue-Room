@@ -13,36 +13,49 @@ interface RoomItem {
   createdAt?: number
 }
 
-function extractPayload(rec: unknown): Record<string, unknown> {
-  if (!rec || typeof rec !== 'object') return {}
-  const obj = rec as Record<string, unknown>
-  const inner =
-    obj.data && typeof obj.data === 'object'
-      ? (obj.data as Record<string, unknown>)
-      : obj.record && typeof obj.record === 'object'
-        ? (obj.record as Record<string, unknown>)
-        : {}
+function unwrapRecord<T extends Record<string, unknown>>(rec: unknown): T & { id: string } {
+  if (!rec || typeof rec !== 'object') {
+    return { id: '' } as T & { id: string }
+  }
+  const envelope = rec as Record<string, unknown>
+  const payload =
+    envelope.data && typeof envelope.data === 'object'
+      ? (envelope.data as Record<string, unknown>)
+      : envelope
+
+  const id =
+    typeof envelope.recordId === 'string' && envelope.recordId
+      ? envelope.recordId
+      : typeof payload.id === 'string' && payload.id
+        ? payload.id
+        : typeof envelope.id === 'string' && envelope.id
+          ? envelope.id
+          : ''
+
   return {
-    ...inner,
-    ...obj,
-    ...(typeof obj.id === 'string' && obj.id
-      ? { id: obj.id }
-      : typeof inner.id === 'string'
-        ? { id: inner.id }
-        : {}),
+    ...(payload as T),
+    id,
   }
 }
 
 function toRoomItem(rec: RecordData<RoomItem>): RoomItem {
-  const raw = extractPayload(rec) as Partial<RoomItem>
+  const raw = unwrapRecord<Partial<RoomItem>>(rec)
+  const envelope = rec as unknown as Record<string, unknown>
+  const createdAt =
+    typeof raw.createdAt === 'number'
+      ? raw.createdAt
+      : typeof envelope.createdAt === 'number'
+        ? envelope.createdAt
+        : 0
+
   return {
-    id: String(raw.id ?? ''),
+    id: raw.id,
     title: String(raw.title ?? 'Untitled Jam'),
     hostUserId: String(raw.hostUserId ?? ''),
     hostName: String(raw.hostName ?? 'Host'),
     status: raw.status === 'locked' || raw.status === 'ended' ? raw.status : 'open',
     nowPlayingTrackId: raw.nowPlayingTrackId ? String(raw.nowPlayingTrackId) : '',
-    createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : 0,
+    createdAt,
   }
 }
 
@@ -116,6 +129,7 @@ export default function HomePage() {
 
   function handleJoinRoom(e: FormEvent) {
     e.preventDefault()
+    setFormError(null)
     const targetId = extractRoomIdFromInput(joinInput)
     if (!targetId) {
       setFormError('Enter a room code or paste a /room/... link.')
@@ -214,7 +228,7 @@ export default function HomePage() {
                 type="text"
                 value={joinInput}
                 onChange={(e) => setJoinInput(e.target.value)}
-                placeholder="e.g. a1b2c3d4 or /room/a1b2c3d4"
+                placeholder="e.g. d3bb04c5 or /room/d3bb04c5"
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
               />
             </div>
@@ -245,9 +259,9 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="divide-y divide-border rounded-xl border border-border bg-card">
-            {rooms.map((room: RoomItem) => (
+            {rooms.map((room: RoomItem, idx: number) => (
               <div
-                key={room.id}
+                key={room.id || `room-${idx}`}
                 className="flex flex-col gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div>

@@ -34,21 +34,56 @@ type VoteRecord = {
   createdAt: number
 }
 
-function unwrapRecord<T>(data: unknown): T | null {
-  if (!data || typeof data !== 'object') return null
-  if ('record' in data) {
-    return ((data as { record: T | null }).record ?? null)
+function normalizeEnvelope<T extends { id?: string }>(raw: unknown): T | null {
+  if (!raw || typeof raw !== 'object') return null
+  const outer = raw as Record<string, unknown>
+
+  const inner =
+    outer.record && typeof outer.record === 'object'
+      ? (outer.record as Record<string, unknown>)
+      : outer
+
+  const payload =
+    inner.data && typeof inner.data === 'object'
+      ? (inner.data as Record<string, unknown>)
+      : inner
+
+  const id =
+    typeof inner.recordId === 'string' && inner.recordId
+      ? inner.recordId
+      : typeof outer.recordId === 'string' && outer.recordId
+        ? outer.recordId
+        : typeof payload.id === 'string' && payload.id
+          ? payload.id
+          : typeof inner.id === 'string' && inner.id
+            ? inner.id
+            : ''
+
+  if (!id && Object.keys(payload).length === 0) return null
+  return {
+    ...(payload as T),
+    ...(id ? { id } : {}),
   }
-  return data as T
 }
 
-function unwrapRecords<T>(data: unknown): T[] {
-  if (Array.isArray(data)) return data as T[]
-  if (data && typeof data === 'object' && 'records' in data) {
-    const recs = (data as { records?: unknown }).records
-    return Array.isArray(recs) ? (recs as T[]) : []
+function unwrapRecord<T extends { id?: string }>(data: unknown): T | null {
+  if (!data || typeof data !== 'object') return null
+  if ('record' in data && (data as { record: unknown }).record == null) {
+    return null
   }
-  return []
+  return normalizeEnvelope<T>(data)
+}
+
+function unwrapRecords<T extends { id?: string }>(data: unknown): T[] {
+  const list = Array.isArray(data)
+    ? data
+    : data && typeof data === 'object' && Array.isArray((data as { records?: unknown }).records)
+      ? (data as { records: unknown[] }).records
+      : []
+
+  return list
+    .map((item) => normalizeEnvelope<T>(item))
+    .filter((item): item is T => item !== null)
 }
 
 function normalizeTrackKey(title: string, artist: string): string {
@@ -119,7 +154,7 @@ export const createRoom: ActionHandler<Env> = async ({ userId, params, tools }) 
   if (!created.success) {
     return { success: false, error: created.error ?? 'Failed to create room' }
   }
-  return { success: true, data: { roomId, room: created.data } }
+  return { success: true, data: { roomId, room: unwrapRecord<RoomRecord>(created.data) } }
 }
 
 export const setRoomStatus: ActionHandler<Env> = async ({ userId, params, tools }) => {
@@ -134,7 +169,7 @@ export const setRoomStatus: ActionHandler<Env> = async ({ userId, params, tools 
 
   const updated = await tools.update('rooms', roomId, { status })
   return updated.success
-    ? { success: true, data: { room: updated.data } }
+    ? { success: true, data: { room: unwrapRecord<RoomRecord>(updated.data) } }
     : { success: false, error: updated.error ?? 'Failed to update room status' }
 }
 
@@ -218,7 +253,7 @@ export const submitTrack: ActionHandler<Env> = async ({ userId, params, tools })
     `${trackId}:${userId}`,
   )
 
-  return { success: true, data: { trackId, track: created.data } }
+  return { success: true, data: { trackId, track: unwrapRecord<TrackRecord>(created.data) } }
 }
 
 export const toggleVote: ActionHandler<Env> = async ({ userId, params, tools }) => {

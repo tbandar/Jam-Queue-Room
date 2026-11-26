@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getAuthToken, useAuthProfileReady, useQuery, type RecordData } from 'deepspace'
 
@@ -42,49 +42,55 @@ interface SubmitTrackResponseData {
   trackId?: string
 }
 
-function extractPayload(rec: unknown): Record<string, unknown> {
-  if (!rec || typeof rec !== 'object') return {}
-  const obj = rec as Record<string, unknown>
-  const inner =
-    obj.data && typeof obj.data === 'object'
-      ? (obj.data as Record<string, unknown>)
-      : obj.record && typeof obj.record === 'object'
-        ? (obj.record as Record<string, unknown>)
-        : {}
-  const resolvedId =
-    typeof obj.id === 'string' && obj.id
-      ? obj.id
-      : typeof obj._id === 'string' && obj._id
-        ? obj._id
-        : typeof inner.id === 'string' && inner.id
-          ? inner.id
-          : typeof inner._id === 'string' && inner._id
-            ? inner._id
-            : ''
+function unwrapRecord<T extends Record<string, unknown>>(rec: unknown): T & { id: string } {
+  if (!rec || typeof rec !== 'object') {
+    return { id: '' } as T & { id: string }
+  }
+  const envelope = rec as Record<string, unknown>
+  const payload =
+    envelope.data && typeof envelope.data === 'object'
+      ? (envelope.data as Record<string, unknown>)
+      : envelope
+
+  const id =
+    typeof envelope.recordId === 'string' && envelope.recordId
+      ? envelope.recordId
+      : typeof payload.id === 'string' && payload.id
+        ? payload.id
+        : typeof envelope.id === 'string' && envelope.id
+          ? envelope.id
+          : ''
+
   return {
-    ...inner,
-    ...obj,
-    ...(resolvedId ? { id: resolvedId } : {}),
+    ...(payload as T),
+    id,
   }
 }
 
 function toRoomItem(rec: RecordData<RoomItem>): RoomItem {
-  const raw = extractPayload(rec) as Partial<RoomItem>
+  const raw = unwrapRecord<Partial<RoomItem>>(rec)
+  const envelope = rec as unknown as Record<string, unknown>
   return {
-    id: String(raw.id ?? ''),
+    id: raw.id,
     title: String(raw.title ?? 'Untitled Jam'),
     hostUserId: String(raw.hostUserId ?? ''),
     hostName: String(raw.hostName ?? 'Host'),
     status: raw.status === 'locked' || raw.status === 'ended' ? raw.status : 'open',
     nowPlayingTrackId: raw.nowPlayingTrackId ? String(raw.nowPlayingTrackId) : '',
-    createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : 0,
+    createdAt:
+      typeof raw.createdAt === 'number'
+        ? raw.createdAt
+        : typeof envelope.createdAt === 'number'
+          ? envelope.createdAt
+          : 0,
   }
 }
 
 function toTrackItem(rec: RecordData<TrackItem>): TrackItem {
-  const raw = extractPayload(rec) as Partial<TrackItem>
+  const raw = unwrapRecord<Partial<TrackItem>>(rec)
+  const envelope = rec as unknown as Record<string, unknown>
   return {
-    id: String(raw.id ?? ''),
+    id: raw.id,
     roomId: String(raw.roomId ?? ''),
     title: String(raw.title ?? 'Untitled Track'),
     artist: String(raw.artist ?? 'Unknown Artist'),
@@ -95,18 +101,29 @@ function toTrackItem(rec: RecordData<TrackItem>): TrackItem {
     status: raw.status === 'up_next' || raw.status === 'played' ? raw.status : 'queued',
     sortOrder: typeof raw.sortOrder === 'number' ? raw.sortOrder : 0,
     voteCount: typeof raw.voteCount === 'number' ? raw.voteCount : 0,
-    createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : 0,
+    createdAt:
+      typeof raw.createdAt === 'number'
+        ? raw.createdAt
+        : typeof envelope.createdAt === 'number'
+          ? envelope.createdAt
+          : 0,
   }
 }
 
 function toVoteItem(rec: RecordData<VoteItem>): VoteItem {
-  const raw = extractPayload(rec) as Partial<VoteItem>
+  const raw = unwrapRecord<Partial<VoteItem>>(rec)
+  const envelope = rec as unknown as Record<string, unknown>
   return {
-    id: String(raw.id ?? ''),
+    id: raw.id,
     roomId: String(raw.roomId ?? ''),
     trackId: String(raw.trackId ?? ''),
     userId: String(raw.userId ?? ''),
-    createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : 0,
+    createdAt:
+      typeof raw.createdAt === 'number'
+        ? raw.createdAt
+        : typeof envelope.createdAt === 'number'
+          ? envelope.createdAt
+          : 0,
   }
 }
 
@@ -127,7 +144,8 @@ async function callServerAction<TData = Record<string, unknown>>(
 }
 
 export default function RoomBoardPage() {
-  const { roomId = '' } = useParams()
+  const params = useParams()
+  const roomId = params.roomId ?? ''
   const { user } = useAuthProfileReady({ requireUser: true })
 
   const roomsQuery = useQuery<RoomItem>('rooms', { limit: 100 })
@@ -147,12 +165,20 @@ export default function RoomBoardPage() {
     [allRooms, roomId],
   )
 
-  const room: RoomItem = matchedRoom ?? {
-    id: roomId,
-    title: `Jam Room (${roomId})`,
-    hostUserId: currentUserId,
-    hostName: defaultDisplayName,
-    status: 'open',
+  const [roomStatusOverride, setRoomStatusOverride] = useState<RoomItem['status'] | null>(null)
+
+  useEffect(() => {
+    setRoomStatusOverride(null)
+  }, [roomId, matchedRoom?.status])
+
+  const room: RoomItem = {
+    id: matchedRoom?.id || roomId,
+    title: matchedRoom?.title || `Jam Room (${roomId})`,
+    hostUserId: matchedRoom?.hostUserId || currentUserId,
+    hostName: matchedRoom?.hostName || defaultDisplayName,
+    status: roomStatusOverride ?? matchedRoom?.status ?? 'open',
+    nowPlayingTrackId: matchedRoom?.nowPlayingTrackId ?? '',
+    createdAt: matchedRoom?.createdAt ?? 0,
   }
 
   const isHost = Boolean(
@@ -213,6 +239,8 @@ export default function RoomBoardPage() {
   } | null>(null)
   const [copiedLink, setCopiedLink] = useState(false)
   const [busyKey, setBusyKey] = useState<string | null>(null)
+
+  const writesDisabled = busyKey !== null
 
   async function handleCopyInvite() {
     const url = window.location.href
@@ -293,6 +321,8 @@ export default function RoomBoardPage() {
       const res = await callServerAction('setRoomStatus', { roomId, status })
       if (!res.success) {
         setFeedback(res.error ?? 'Only the room host can change room status.')
+      } else {
+        setRoomStatusOverride(status)
       }
     } finally {
       setBusyKey(null)
@@ -313,14 +343,6 @@ export default function RoomBoardPage() {
     } finally {
       setBusyKey(null)
     }
-  }
-
-  if (roomsQuery.status === 'loading') {
-    return (
-      <div className="mx-auto max-w-5xl px-4 py-10 text-sm text-muted-foreground">
-        Loading jam room...
-      </div>
-    )
   }
 
   if (!roomId) {
@@ -390,7 +412,7 @@ export default function RoomBoardPage() {
             <>
               <button
                 type="button"
-                disabled={busyKey !== null}
+                disabled={writesDisabled}
                 onClick={() =>
                   handleSetRoomStatus(room.status === 'locked' ? 'open' : 'locked')
                 }
@@ -400,7 +422,7 @@ export default function RoomBoardPage() {
               </button>
               <button
                 type="button"
-                disabled={busyKey !== null || room.status === 'ended'}
+                disabled={writesDisabled || room.status === 'ended'}
                 onClick={() => handleSetRoomStatus('ended')}
                 className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-500/20 disabled:opacity-50"
               >
@@ -429,8 +451,9 @@ export default function RoomBoardPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              disabled={writesDisabled}
               onClick={() => handleToggleVote(duplicateMatch.existingTrack.id)}
-              className="rounded-lg bg-amber-400 px-3.5 py-1.5 text-xs font-semibold text-zinc-950 hover:opacity-90"
+              className="rounded-lg bg-amber-400 px-3.5 py-1.5 text-xs font-semibold text-zinc-950 hover:opacity-90 disabled:opacity-50"
             >
               {votedTrackIds.has(duplicateMatch.existingTrack.id)
                 ? 'Remove Vote'
@@ -557,8 +580,9 @@ export default function RoomBoardPage() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
+                      disabled={writesDisabled}
                       onClick={() => handleToggleVote(track.id)}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
                         votedTrackIds.has(track.id)
                           ? 'border-primary bg-primary text-primary-foreground'
                           : 'border-border bg-background hover:bg-muted'
@@ -570,15 +594,17 @@ export default function RoomBoardPage() {
                       <>
                         <button
                           type="button"
+                          disabled={writesDisabled}
                           onClick={() => handleHostTrackAction(track.id, 'played')}
-                          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs hover:bg-muted"
+                          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
                         >
                           Mark Played
                         </button>
                         <button
                           type="button"
+                          disabled={writesDisabled}
                           onClick={() => handleHostTrackAction(track.id, 'requeue')}
-                          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs hover:bg-muted"
+                          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
                         >
                           Back to Queue
                         </button>
@@ -632,9 +658,9 @@ export default function RoomBoardPage() {
                       <div className="flex flex-wrap items-center gap-1.5">
                         <button
                           type="button"
-                          disabled={busyKey === `vote:${track.id}`}
+                          disabled={writesDisabled}
                           onClick={() => handleToggleVote(track.id)}
-                          className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                          className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${
                             hasVoted
                               ? 'border-primary bg-primary text-primary-foreground'
                               : 'border-border bg-card text-foreground hover:bg-muted'
@@ -647,15 +673,15 @@ export default function RoomBoardPage() {
                           <>
                             <button
                               type="button"
-                              disabled={busyKey !== null}
+                              disabled={writesDisabled}
                               onClick={() => handleHostTrackAction(track.id, 'up_next')}
-                              className="rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/20"
+                              className="rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
                             >
                               Up Next
                             </button>
                             <button
                               type="button"
-                              disabled={busyKey !== null || index === 0}
+                              disabled={writesDisabled || index === 0}
                               onClick={() => handleHostTrackAction(track.id, 'move_up')}
                               title="Move up"
                               className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs hover:bg-muted disabled:opacity-30"
@@ -664,7 +690,7 @@ export default function RoomBoardPage() {
                             </button>
                             <button
                               type="button"
-                              disabled={busyKey !== null || index === queuedTracks.length - 1}
+                              disabled={writesDisabled || index === queuedTracks.length - 1}
                               onClick={() => handleHostTrackAction(track.id, 'move_down')}
                               title="Move down"
                               className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs hover:bg-muted disabled:opacity-30"
@@ -673,17 +699,17 @@ export default function RoomBoardPage() {
                             </button>
                             <button
                               type="button"
-                              disabled={busyKey !== null}
+                              disabled={writesDisabled}
                               onClick={() => handleHostTrackAction(track.id, 'played')}
-                              className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs hover:bg-muted"
+                              className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
                             >
                               Played
                             </button>
                             <button
                               type="button"
-                              disabled={busyKey !== null}
+                              disabled={writesDisabled}
                               onClick={() => handleHostTrackAction(track.id, 'delete')}
-                              className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-200 hover:bg-red-500/20"
+                              className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-200 hover:bg-red-500/20 disabled:opacity-50"
                             >
                               Remove
                             </button>
@@ -717,8 +743,9 @@ export default function RoomBoardPage() {
                       {isHost && (
                         <button
                           type="button"
+                          disabled={writesDisabled}
                           onClick={() => handleHostTrackAction(track.id, 'requeue')}
-                          className="underline hover:text-foreground"
+                          className="underline hover:text-foreground disabled:opacity-50"
                         >
                           Re-queue
                         </button>
@@ -733,4 +760,4 @@ export default function RoomBoardPage() {
       </div>
     </div>
   )
-}
+} 
